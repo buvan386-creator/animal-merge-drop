@@ -293,11 +293,26 @@
   const engine = Engine.create();
   engine.world.gravity.y = 1.6;
   engine.enableSleeping = true;
+  // Mobile devices run slower/janky frames, which means more corrective force
+  // gets bunched into a single physics step whenever a crowded stack gets
+  // shoved apart (e.g. a merge inside a packed pile). Default iteration
+  // counts (6/4) aren't firm enough for that, letting a thin wall get
+  // skipped over in one step. Raising them makes the solver push bodies out
+  // of overlap more gradually instead of with one big kick.
+  engine.positionIterations = 12;
+  engine.velocityIterations = 10;
 
+  // WALL_THICKNESS: the previous 30px walls were thin enough that a hard
+  // shove from a crowded stack could tunnel a circle past them entirely
+  // before it was ever rendered on the far side. Thickening them gives the
+  // solver a real physical barrier instead of relying only on the
+  // enforceBounds() safety net to catch it after the fact. Inner faces stay
+  // flush with x=0 and x=WIDTH — only the outward-facing side got thicker.
+  const WALL_THICKNESS = 200;
   Composite.add(engine.world, [
     Bodies.rectangle(WIDTH/2, HEIGHT + 15, WIDTH + 60, 30, { isStatic: true }),
-    Bodies.rectangle(-15, HEIGHT/2, 30, HEIGHT, { isStatic: true }),
-    Bodies.rectangle(WIDTH + 15, HEIGHT/2, 30, HEIGHT, { isStatic: true })
+    Bodies.rectangle(-WALL_THICKNESS/2, HEIGHT/2, WALL_THICKNESS, HEIGHT, { isStatic: true }),
+    Bodies.rectangle(WIDTH + WALL_THICKNESS/2, HEIGHT/2, WALL_THICKNESS, HEIGHT, { isStatic: true })
   ]);
 
   // ---------- DIFFICULTY SCALING ----------
@@ -327,8 +342,14 @@
       let vx = b.velocity.x, vy = b.velocity.y;
       let changed = false;
 
-      if (x - r < 0){ x = r; vx = Math.abs(vx) * 0.3; changed = true; }
-      else if (x + r > WIDTH){ x = WIDTH - r; vx = -Math.abs(vx) * 0.3; changed = true; }
+      // Hard stop at the wall (vx = 0) rather than a partial bounce. A
+      // damped bounce still left some velocity pointed at the wall, so on a
+      // slow/janky mobile frame it could take several frames to fully kill
+      // that motion — during which the circle visibly crept back toward,
+      // and sometimes past, the edge. Zeroing it outright reads as a solid,
+      // immovable wall instead.
+      if (x - r < 0){ x = r; vx = 0; changed = true; }
+      else if (x + r > WIDTH){ x = WIDTH - r; vx = 0; changed = true; }
       if (y + r > HEIGHT){ y = HEIGHT - r; vy = -Math.abs(vy) * 0.3; changed = true; }
 
       const speed = Math.hypot(vx, vy);
@@ -615,8 +636,8 @@
     Composite.clear(engine.world, false);
     Composite.add(engine.world, [
       Bodies.rectangle(WIDTH/2, HEIGHT + 15, WIDTH + 60, 30, { isStatic: true }),
-      Bodies.rectangle(-15, HEIGHT/2, 30, HEIGHT, { isStatic: true }),
-      Bodies.rectangle(WIDTH + 15, HEIGHT/2, 30, HEIGHT, { isStatic: true })
+      Bodies.rectangle(-WALL_THICKNESS/2, HEIGHT/2, WALL_THICKNESS, HEIGHT, { isStatic: true }),
+      Bodies.rectangle(WIDTH + WALL_THICKNESS/2, HEIGHT/2, WALL_THICKNESS, HEIGHT, { isStatic: true })
     ]);
     gameState.animals = [];
     gameState.particles = [];
