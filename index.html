@@ -312,6 +312,35 @@
     gameState.spawnPoolSize = poolSize;
   }
 
+  // ---------- BOUNDS SAFETY NET ----------
+  // Matter's solver can eject a body hard enough to tunnel through a wall in
+  // a single step — most commonly when a merge drops a big new circle into
+  // an already-packed pile and several neighbors have to be shoved apart at
+  // once. Rather than chase every physics edge case, hard-clamp every animal
+  // back inside the play field (and cap runaway velocity) every frame.
+  const MAX_SPEED = 25;
+  function enforceBounds(){
+    gameState.animals.forEach(a => {
+      const b = a.body;
+      const r = RADII[a.level];
+      let x = b.position.x, y = b.position.y;
+      let vx = b.velocity.x, vy = b.velocity.y;
+      let changed = false;
+
+      if (x - r < 0){ x = r; vx = Math.abs(vx) * 0.3; changed = true; }
+      else if (x + r > WIDTH){ x = WIDTH - r; vx = -Math.abs(vx) * 0.3; changed = true; }
+      if (y + r > HEIGHT){ y = HEIGHT - r; vy = -Math.abs(vy) * 0.3; changed = true; }
+
+      const speed = Math.hypot(vx, vy);
+      if (speed > MAX_SPEED){ const s = MAX_SPEED / speed; vx *= s; vy *= s; changed = true; }
+
+      if (changed){
+        Body.setPosition(b, { x, y });
+        Body.setVelocity(b, { x: vx, y: vy });
+      }
+    });
+  }
+
   // ---------- CANVASES ----------
   const physicsCanvas = document.getElementById('physicsCanvas');
   const particleCanvas = document.getElementById('particleCanvas');
@@ -729,6 +758,7 @@
 
     if (!gameState.gameOver && !gameState.paused){
       Engine.update(engine, 1000 / 60);
+      enforceBounds();
       applyMerges();     // atomic remove-old / add-new, once per frame
       checkBreach(dt);
       updateDifficulty();
