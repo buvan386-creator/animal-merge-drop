@@ -378,7 +378,13 @@
   function pointerXFromEvent(e){
     const rect = physicsCanvas.getBoundingClientRect();
     const scaleX = WIDTH / rect.width;
-    return Math.max(30, Math.min(WIDTH - 30, (e.clientX - rect.left) * scaleX));
+    // Margin must scale with the next animal's actual radius — a fixed 30px
+    // margin was fine when animals topped out small, but with the pool now
+    // going up to level 8 (radius 73+), a big piece aimed near the edge was
+    // spawning already overlapping the wall, and the solver's violent
+    // separation impulse to fix that overlap is what was launching it out.
+    const margin = RADII[gameState.nextLevel] + 5;
+    return Math.max(margin, Math.min(WIDTH - margin, (e.clientX - rect.left) * scaleX));
   }
 
   function isUIButton(e){
