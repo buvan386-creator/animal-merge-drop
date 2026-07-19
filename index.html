@@ -30,6 +30,7 @@
     box-shadow:0 20px 60px rgba(0,0,0,.5);
     transform-origin:center center;
     overflow:hidden;
+    touch-action:none;
   }
   canvas{ position:absolute; top:0; left:0; width:450px; height:800px; display:block; }
   #physicsCanvas{ z-index:1; }
@@ -294,9 +295,9 @@
   engine.enableSleeping = true;
 
   Composite.add(engine.world, [
-    Bodies.rectangle(WIDTH/2, HEIGHT + 10, WIDTH, 20, { isStatic: true }),
-    Bodies.rectangle(-5, HEIGHT/2, 10, HEIGHT, { isStatic: true }),
-    Bodies.rectangle(WIDTH + 5, HEIGHT/2, 10, HEIGHT, { isStatic: true })
+    Bodies.rectangle(WIDTH/2, HEIGHT + 15, WIDTH + 60, 30, { isStatic: true }),
+    Bodies.rectangle(-15, HEIGHT/2, 30, HEIGHT, { isStatic: true }),
+    Bodies.rectangle(WIDTH + 15, HEIGHT/2, 30, HEIGHT, { isStatic: true })
   ]);
 
   // ---------- DIFFICULTY SCALING ----------
@@ -337,21 +338,32 @@
   ro.observe(stageWrap);
 
   // ---------- INPUT ----------
+  // Pointer Events unify mouse/touch/pen through one path. This matters here
+  // for two reasons: (1) it lets touch drag-to-aim before dropping, the same
+  // way mouse hover already worked; (2) it avoids the classic mobile bug
+  // where touchstart AND a synthetic mousedown both fire for one tap,
+  // spawning two overlapping bodies that then get violently separated by
+  // the physics solver — that's what was launching animals through the wall.
   let spawnLocked = false; // debounce drop while a merge/settle happens
 
   function pointerXFromEvent(e){
     const rect = physicsCanvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const scaleX = WIDTH / rect.width;
-    return Math.max(30, Math.min(WIDTH - 30, (clientX - rect.left) * scaleX));
+    return Math.max(30, Math.min(WIDTH - 30, (e.clientX - rect.left) * scaleX));
   }
 
-  gameContainer.addEventListener('mousemove', e => {
+  function isUIButton(e){
+    return !!(e.target.closest && e.target.closest('button'));
+  }
+
+  gameContainer.addEventListener('pointerdown', e => {
+    if (isUIButton(e)) return;
     gameState.mouseX = pointerXFromEvent(e);
   });
-  gameContainer.addEventListener('touchmove', e => {
+  gameContainer.addEventListener('pointermove', e => {
+    if (isUIButton(e)) return;
     gameState.mouseX = pointerXFromEvent(e);
-  }, { passive: true });
+  });
 
   function dropAnimal(){
     if (gameState.gameOver || gameState.paused || spawnLocked) return;
@@ -368,8 +380,10 @@
     setTimeout(() => { spawnLocked = false; }, 180);
   }
 
-  gameContainer.addEventListener('mousedown', dropAnimal);
-  gameContainer.addEventListener('touchstart', e => { dropAnimal(); }, { passive: true });
+  gameContainer.addEventListener('pointerup', e => {
+    if (isUIButton(e)) return;
+    dropAnimal();
+  });
 
   // ---------- COLLISION -> MERGE QUEUE ----------
   // Collisions only *record* candidate pairs. The actual remove/add happens
@@ -565,9 +579,9 @@
   window.resetGame = function(){
     Composite.clear(engine.world, false);
     Composite.add(engine.world, [
-      Bodies.rectangle(WIDTH/2, HEIGHT + 10, WIDTH, 20, { isStatic: true }),
-      Bodies.rectangle(-5, HEIGHT/2, 10, HEIGHT, { isStatic: true }),
-      Bodies.rectangle(WIDTH + 5, HEIGHT/2, 10, HEIGHT, { isStatic: true })
+      Bodies.rectangle(WIDTH/2, HEIGHT + 15, WIDTH + 60, 30, { isStatic: true }),
+      Bodies.rectangle(-15, HEIGHT/2, 30, HEIGHT, { isStatic: true }),
+      Bodies.rectangle(WIDTH + 15, HEIGHT/2, 30, HEIGHT, { isStatic: true })
     ]);
     gameState.animals = [];
     gameState.particles = [];
