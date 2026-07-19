@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Merge Drop">
+<meta name="theme-color" content="#0b1120">
+<meta name="format-detection" content="telephone=no">
+<title>Animal Merge Drop</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root{
+    --bg-deep:#0b1120;
+    --bg-panel:#131c31;
+    --line-danger:#ef4444;
+    --accent:#f59e0b;
+    --text-soft:#94a3b8;
+  }
+  html,body{height:100%;margin:0;background:var(--bg-deep);overflow:hidden;font-family:ui-sans-serif,system-ui,sans-serif;}
+  #stage-wrap{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+  }
+  #game-container{
+    position:relative; width:450px; height:800px;
+    background:var(--bg-panel); border:2px solid #1e293b; border-radius:10px;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);
+    transform-origin:center center;
+    overflow:hidden;
+  }
+  canvas{ position:absolute; top:0; left:0; width:450px; height:800px; display:block; }
+  #physicsCanvas{ z-index:1; }
+  #particleCanvas{ z-index:2; pointer-events:none; }
+  #hud{ position:absolute; top:0; left:0; right:0; z-index:3; padding:14px 16px; pointer-events:none; display:flex; justify-content:space-between; align-items:flex-start; }
+  .hud-chip{ background:rgba(15,23,42,.65); backdrop-filter:blur(4px); border:1px solid #1e293b; border-radius:8px; padding:6px 12px; }
+  #gameOverScreen{
+    position:absolute; inset:0; z-index:10; background:rgba(11,17,32,.92);
+    display:none; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+  }
+  #gameOverScreen.show{ display:flex; }
+  .btn{ background:var(--accent); color:#1c1207; font-weight:700; padding:10px 22px; border-radius:8px; border:none; cursor:pointer; }
+  .btn:hover{ filter:brightness(1.08); }
+  #startOverlay{
+    position:absolute; inset:0; z-index:20; background:rgba(11,17,32,.88);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    cursor:pointer;
+  }
+  #startOverlay.hidden{ display:none; }
+  #muteBtn, #pauseBtn{
+    pointer-events:auto; cursor:pointer; background:rgba(15,23,42,.65); border:1px solid #1e293b;
+    border-radius:8px; width:34px; height:34px; display:flex; align-items:center; justify-content:center;
+  }
+  #muteBtn svg, #pauseBtn svg{ width:18px; height:18px; }
+  #shakeLayer{ position:relative; width:100%; height:100%; }
+  #shakeLayer.shake{ animation: shakeAnim 100ms linear; }
+  @keyframes shakeAnim{
+    0%{ transform:translate(0,0); }
+    25%{ transform:translate(-6px,3px); }
+    50%{ transform:translate(5px,-4px); }
+    75%{ transform:translate(-4px,2px); }
+    100%{ transform:translate(0,0); }
+  }
+  #pausedOverlay{
+    position:absolute; inset:0; z-index:15; background:rgba(11,17,32,.72);
+    display:none; align-items:center; justify-content:center;
+    pointer-events:none;
+  }
+  #pausedOverlay.show{ display:flex; }
+</style>
+</head>
+<body>
+  <div id="stage-wrap">
+    <div id="game-container">
+      <div id="shakeLayer">
+        <canvas id="physicsCanvas" width="450" height="800"></canvas>
+        <canvas id="particleCanvas" width="450" height="800"></canvas>
+
+        <div id="hud">
+          <div class="hud-chip text-white text-sm">
+            <div class="text-slate-400 text-[10px] uppercase tracking-wide">Score</div>
+            <div id="scoreVal" class="text-xl font-bold leading-tight">0</div>
+          </div>
+          <div class="flex items-start gap-2">
+            <div class="hud-chip text-white text-sm text-right">
+              <div class="text-slate-400 text-[10px] uppercase tracking-wide">Best</div>
+              <div id="highScoreVal" class="text-xl font-bold leading-tight">0</div>
+            </div>
+            <button id="pauseBtn" aria-label="Pause game">
+              <svg id="iconPause" viewBox="0 0 24 24" fill="white" stroke="none">
+                <rect x="6" y="5" width="4" height="14" rx="1"></rect>
+                <rect x="14" y="5" width="4" height="14" rx="1"></rect>
+              </svg>
+              <svg id="iconPlay" viewBox="0 0 24 24" fill="white" stroke="none" style="display:none">
+                <polygon points="6 4 20 12 6 20"></polygon>
+              </svg>
+            </button>
+            <button id="muteBtn" aria-label="Toggle sound">
+              <svg id="iconSoundOn" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="4 9 8 9 12 5 12 19 8 15 4 15" fill="white" stroke="none"></polygon>
+                <path d="M16 8a5 5 0 0 1 0 8"></path>
+                <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
+              </svg>
+              <svg id="iconSoundOff" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+                <polygon points="4 9 8 9 12 5 12 19 8 15 4 15" fill="white" stroke="none"></polygon>
+                <line x1="17" y1="8" x2="23" y2="14"></line>
+                <line x1="23" y1="8" x2="17" y2="14"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div id="pausedOverlay">
+          <div class="text-white text-xl font-bold tracking-wide">Paused</div>
+        </div>
+
+        <div id="startOverlay">
+          <div class="text-white text-lg font-bold">Animal Merge Drop</div>
+          <div class="text-slate-400 text-xs">Enables sound &amp; drops your first animal</div>
+          <button id="startBtn" class="btn">Start Game</button>
+        </div>
+
+        <div id="gameOverScreen">
+          <div class="text-white text-2xl font-bold">Game Over</div>
+          <div class="text-slate-300 text-sm">Score: <span id="finalScore">0</span></div>
+          <div class="text-slate-400 text-xs mb-2">High Score: <span id="finalHigh">0</span></div>
+          <button class="btn" onclick="resetGame()">Try Again</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  // ---------- CONFIG ----------
+  const ANIMALS = ["🐜", "🐝", "🦋", "🪲", "🐸", "🦀", "🐟", "🐱", "🐶", "🐒", "🐼", "🦁", "🐘"];
+  const RADII   = [18, 24, 30, 37, 45, 54, 63, 73, 83, 93, 103, 113, 125];
+
+  // Asset dictionary: level -> image URL. Fill this in with real art later
+  // (e.g. ASSETS[0] = 'https://yourcdn.com/ant.png') and nothing else needs
+  // to change. Left empty -> renders the emoji glyphs below instead.
+  const ASSET_LABELS = ["Ant","Bee","Butterfly","Beetle","Frog","Crab","Fish","Cat","Dog","Monkey","Panda","Lion","Elephant"];
+  const ASSETS = {};
+  const imageCache = {};
+
+  function preloadAssets(cb){
+    const urls = Object.values(ASSETS);
+    if (urls.length === 0) return cb();
+    let loaded = 0;
+    urls.forEach((url, i) => {
+      const img = new Image();
+      img.onload = img.onerror = () => { loaded++; if (loaded === urls.length) cb(); };
+      img.src = url;
+      imageCache[i] = img;
+    });
+  }
+
+  // ---------- AUDIO ENGINE ----------
+  // Sounds are synthesized with the Web Audio API rather than loaded from
+  // files — there are no real audio assets to host, and synthesis sidesteps
+  // broken links entirely. Every play() call spins up its own oscillator/gain
+  // nodes, so overlapping sounds (chain-reaction merges) never clip or cut
+  // each other off — that's "free" with this architecture.
+  class AudioManager {
+    constructor(){
+      this.ctx = null;
+      this.master = null;
+      this.unlocked = false;
+      this.muted = false;
+    }
+    init(){
+      if (this.ctx) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.muted ? 0 : 1;
+      this.master.connect(this.ctx.destination);
+    }
+    async unlock(){
+      this.init();
+      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      // Silent buffer play satisfies iOS/Safari's stricter unlock requirement.
+      const buffer = this.ctx.createBuffer(1, 1, 22050);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buffer; src.connect(this.master); src.start(0);
+      this.unlocked = true;
+    }
+    setMuted(m){
+      this.muted = m;
+      if (this.master) this.master.gain.value = m ? 0 : 1;
+    }
+    play(name){
+      if (!this.unlocked || !this.ctx) return;
+      const t = this.ctx.currentTime;
+      if (name === 'drop') this._drop(t);
+      else if (name === 'merge') this._merge(t);
+      else if (name === 'warning') this._warning(t);
+      else if (name === 'gameOver') this._gameOver(t);
+      else if (name === 'boom') this._boom(t);
+      else if (name === 'combo') this._combo(t);
+    }
+    _tone(freq, start, dur, type, peak){
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type; osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(gain); gain.connect(this.master);
+      osc.start(start); osc.stop(start + dur + 0.02);
+    }
+    _drop(t){ this._tone(120, t, 0.12, 'sine', 0.18); }              // soft thud
+    _merge(t){ this._tone(700, t, 0.08, 'triangle', 0.22); this._tone(1100, t + 0.04, 0.12, 'sine', 0.18); } // pop + ding
+    _warning(t){ this._tone(220, t, 0.18, 'square', 0.12); }         // low alert
+    _gameOver(t){ [392, 349, 294, 220].forEach((f, i) => this._tone(f, t + i * 0.14, 0.16, 'sawtooth', 0.16)); } // failure jingle
+    _boom(t){
+      // Deep pitch-drop tone
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(160, t);
+      osc.frequency.exponentialRampToValueAtTime(40, t + 0.35);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+      osc.connect(gain); gain.connect(this.master);
+      osc.start(t); osc.stop(t + 0.42);
+      // Filtered noise burst layered underneath for weight
+      const bufferSize = Math.floor(this.ctx.sampleRate * 0.3);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+      const noiseFilter = this.ctx.createBiquadFilter();
+      noiseFilter.type = 'lowpass'; noiseFilter.frequency.value = 500;
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.3, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(this.master);
+      noise.start(t);
+    }
+    _combo(t){
+      [520, 660, 840].forEach((f, i) => this._tone(f, t + i * 0.06, 0.1, 'triangle', 0.2)); // quick rising arpeggio
+    }
+  }
+  const audioManager = new AudioManager();
+
+  const soundThrottle = {};
+  function playThrottled(name, gapMs){
+    const now = performance.now();
+    if (!soundThrottle[name] || now - soundThrottle[name] > gapMs){
+      soundThrottle[name] = now;
+      audioManager.play(name);
+    }
+  }
+
+  const WIDTH = 450, HEIGHT = 800;
+  const DEFAULT_SPAWN_POOL_SIZE = 5; // ant, bee, butterfly, beetle, frog
+  const MAX_SPAWN_POOL_SIZE = 8;     // difficulty scaling caps out introducing up to level 8 (cat)
+  const SPAWN_Y = 120;              // locked spawn path, just above the danger line
+  const DANGER_Y = 150;            // red dashed line
+  const BREACH_MS = 1500;          // continuous stationary breach window
+  const COMBO_WINDOW_MS = 1000;    // second merge within this window extends the combo
+  const SHAKE_LEVEL_THRESHOLD = 4; // merges producing this level or higher trigger screen shake
+  const SQUASH_MS = 150;           // squash-and-stretch duration on impact
+
+  // ---------- SINGLE SOURCE OF TRUTH ----------
+  // Physics bodies are never read directly for rendering. Everything the
+  // renderer needs lives here, and is only mutated inside the frame loop.
+  const gameState = {
+    animals: [],       // { id, body, level }
+    particles: [],      // { x,y,vx,vy,life,maxLife,color }
+    floatingTexts: [],   // { x,y,vy,text,life,maxLife,color }
+    mergeQueue: [],      // pairs of bodies collected this frame, applied atomically
+    squashMap: new Map(), // bodyId -> impact timestamp, drives squash-and-stretch
+    combo: { count: 0, lastTime: 0 },
+    score: 0,
+    highScore: 0,
+    spawnPoolSize: DEFAULT_SPAWN_POOL_SIZE,
+    nextLevel: Math.floor(Math.random() * DEFAULT_SPAWN_POOL_SIZE),
+    mouseX: WIDTH / 2,
+    gameOver: false,
+    paused: false,
+    sleepWatch: new Map()  // bodyId -> breach start timestamp
+  };
+
+  // ---------- MATTER SETUP ----------
+  const { Engine, Bodies, Composite, Events, Body } = Matter;
+  const engine = Engine.create();
+  engine.world.gravity.y = 1.6;
+  engine.enableSleeping = true;
+
+  Composite.add(engine.world, [
+    Bodies.rectangle(WIDTH/2, HEIGHT + 10, WIDTH, 20, { isStatic: true }),
+    Bodies.rectangle(-5, HEIGHT/2, 10, HEIGHT, { isStatic: true }),
+    Bodies.rectangle(WIDTH + 5, HEIGHT/2, 10, HEIGHT, { isStatic: true })
+  ]);
+
+  // ---------- DIFFICULTY SCALING ----------
+  // As score climbs, animals fall a bit faster and more animal types enter
+  // the spawn pool (capped at MAX_SPAWN_POOL_SIZE / level 8).
+  function updateDifficulty(){
+    let gravity = 1.6, poolSize = DEFAULT_SPAWN_POOL_SIZE;
+    if (gameState.score >= 6000){ gravity = 2.3; poolSize = MAX_SPAWN_POOL_SIZE; }
+    else if (gameState.score >= 3000){ gravity = 2.0; poolSize = 7; }
+    else if (gameState.score >= 1000){ gravity = 1.8; poolSize = 6; }
+    engine.world.gravity.y = gravity;
+    gameState.spawnPoolSize = poolSize;
+  }
+
+  // ---------- CANVASES ----------
+  const physicsCanvas = document.getElementById('physicsCanvas');
+  const particleCanvas = document.getElementById('particleCanvas');
+  const pctx = physicsCanvas.getContext('2d');
+  const fxctx = particleCanvas.getContext('2d');
+  const shakeLayer = document.getElementById('shakeLayer');
+
+  function triggerShake(){
+    shakeLayer.classList.remove('shake');
+    // Force reflow so the animation restarts if merges chain in quick succession.
+    void shakeLayer.offsetWidth;
+    shakeLayer.classList.add('shake');
+    setTimeout(() => shakeLayer.classList.remove('shake'), 100);
+  }
+
+  // ---------- RESPONSIVE SCALING (ResizeObserver) ----------
+  const stageWrap = document.getElementById('stage-wrap');
+  const gameContainer = document.getElementById('game-container');
+  const ro = new ResizeObserver(entries => {
+    const { width, height } = entries[0].contentRect;
+    const scale = Math.min(width / WIDTH, height / HEIGHT, 1) * 0.96;
+    gameContainer.style.transform = `scale(${scale})`;
+  });
+  ro.observe(stageWrap);
+
+  // ---------- INPUT ----------
+  let spawnLocked = false; // debounce drop while a merge/settle happens
+
+  function pointerXFromEvent(e){
+    const rect = physicsCanvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const scaleX = WIDTH / rect.width;
+    return Math.max(30, Math.min(WIDTH - 30, (clientX - rect.left) * scaleX));
+  }
+
+  gameContainer.addEventListener('mousemove', e => {
+    gameState.mouseX = pointerXFromEvent(e);
+  });
+  gameContainer.addEventListener('touchmove', e => {
+    gameState.mouseX = pointerXFromEvent(e);
+  }, { passive: true });
+
+  function dropAnimal(){
+    if (gameState.gameOver || gameState.paused || spawnLocked) return;
+    if (!document.getElementById('startOverlay').classList.contains('hidden')) return;
+    spawnLocked = true;
+    const level = gameState.nextLevel;
+    const body = Bodies.circle(gameState.mouseX, SPAWN_Y, RADII[level], {
+      restitution: 0.1, friction: 0.65, frictionStatic: 0.3, frictionAir: 0.001, slop: 0.01
+    });
+    body.animalLevel = level;
+    Composite.add(engine.world, body);
+    gameState.animals.push({ id: body.id, body, level });
+    gameState.nextLevel = Math.floor(Math.random() * gameState.spawnPoolSize);
+    setTimeout(() => { spawnLocked = false; }, 180);
+  }
+
+  gameContainer.addEventListener('mousedown', dropAnimal);
+  gameContainer.addEventListener('touchstart', e => { dropAnimal(); }, { passive: true });
+
+  // ---------- COLLISION -> MERGE QUEUE ----------
+  // Collisions only *record* candidate pairs. The actual remove/add happens
+  // once per frame in applyMerges(), so nothing is ever left in a
+  // half-updated state across frames.
+  Events.on(engine, 'collisionStart', e => {
+    e.pairs.forEach(pair => {
+      const { bodyA, bodyB } = pair;
+      // Drop/thud sound: any impact involving an animal body (animal-animal or animal-wall/floor).
+      if (bodyA.animalLevel !== undefined || bodyB.animalLevel !== undefined){
+        playThrottled('drop', 90);
+      }
+      // Squash-and-stretch: remember the impact moment so the renderer can
+      // flatten the glyph briefly. Applies on any contact — floor or another animal.
+      const now = performance.now();
+      if (bodyA.animalLevel !== undefined) gameState.squashMap.set(bodyA.id, now);
+      if (bodyB.animalLevel !== undefined) gameState.squashMap.set(bodyB.id, now);
+      if (bodyA.animalLevel !== undefined && bodyB.animalLevel !== undefined &&
+          bodyA.animalLevel === bodyB.animalLevel) {
+        gameState.mergeQueue.push([bodyA, bodyB]);
+      }
+    });
+  });
+
+  function applyMerges(){
+    if (gameState.mergeQueue.length === 0) return;
+    const consumed = new Set();
+    const queue = gameState.mergeQueue;
+    gameState.mergeQueue = [];
+
+    queue.forEach(([bodyA, bodyB]) => {
+      if (consumed.has(bodyA.id) || consumed.has(bodyB.id)) return;
+      const stillA = gameState.animals.find(a => a.id === bodyA.id);
+      const stillB = gameState.animals.find(a => a.id === bodyB.id);
+      if (!stillA || !stillB) return;
+
+      consumed.add(bodyA.id); consumed.add(bodyB.id);
+      const level = bodyA.animalLevel;
+      const x = (bodyA.position.x + bodyB.position.x) / 2;
+      const y = (bodyA.position.y + bodyB.position.y) / 2;
+
+      Composite.remove(engine.world, [bodyA, bodyB]);
+      gameState.animals = gameState.animals.filter(a => a.id !== bodyA.id && a.id !== bodyB.id);
+      gameState.sleepWatch.delete(bodyA.id);
+      gameState.sleepWatch.delete(bodyB.id);
+      gameState.squashMap.delete(bodyA.id);
+      gameState.squashMap.delete(bodyB.id);
+
+      const isMaxLevel = level === ANIMALS.length - 1;
+      if (isMaxLevel){
+        // Nothing bigger than the elephant — both vanish for a bonus instead of merging.
+        gameState.score += (level + 1) * 25;
+        spawnBurst(x, y, level, { big: true });
+        audioManager.play('boom');
+        triggerShake();
+        registerCombo(x, y);
+        return;
+      }
+
+      const newBody = Bodies.circle(x, y, RADII[level + 1], { restitution: 0.1, friction: 0.65, frictionStatic: 0.3, frictionAir: 0.001, slop: 0.01 });
+      newBody.animalLevel = level + 1;
+      Composite.add(engine.world, newBody);
+      gameState.animals.push({ id: newBody.id, body: newBody, level: level + 1 });
+
+      gameState.score += (level + 1) * 10;
+      spawnBurst(x, y, level + 1);
+      audioManager.play('merge');
+      if (level + 1 >= SHAKE_LEVEL_THRESHOLD) triggerShake();
+      registerCombo(x, y);
+    });
+  }
+
+  // ---------- COMBO SYSTEM ----------
+  // A second merge landing within COMBO_WINDOW_MS of the last one extends
+  // the combo chain and pays out an escalating bonus with floating text.
+  function registerCombo(x, y){
+    const now = performance.now();
+    if (now - gameState.combo.lastTime < COMBO_WINDOW_MS){
+      gameState.combo.count++;
+    } else {
+      gameState.combo.count = 1;
+    }
+    gameState.combo.lastTime = now;
+    if (gameState.combo.count >= 2){
+      const multiplier = gameState.combo.count;
+      const bonus = multiplier * 15;
+      gameState.score += bonus;
+      spawnFloatingText(x, y - 30, `Combo x${multiplier}!`, '#facc15');
+      audioManager.play('combo');
+    }
+  }
+
+  function spawnFloatingText(x, y, text, color){
+    gameState.floatingTexts.push({ x, y, vy: -0.6, text, life: 800, maxLife: 800, color });
+  }
+
+  // ---------- PARTICLE BURST (top layer) ----------
+  const BURST_COLORS = ['#f59e0b', '#facc15', '#fb923c', '#f87171', '#a3e635'];
+  const BOOM_COLORS = ['#f87171', '#ef4444', '#fb923c', '#fde047'];
+  function spawnBurst(x, y, level, opts){
+    const big = opts && opts.big;
+    const count = big ? (45 + Math.floor(Math.random() * 16)) : (20 + Math.floor(Math.random() * 11)); // 20-30 normal, 45-60 boom
+    const palette = big ? BOOM_COLORS : BURST_COLORS;
+    for (let i = 0; i < count; i++){
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+      const speed = (big ? 3 : 1.5) + Math.random() * (big ? 6 : 3.5);
+      gameState.particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: big ? 700 : 500,
+        maxLife: big ? 700 : 500,
+        color: palette[level % palette.length],
+        r: (big ? 3 : 2) + Math.random() * (big ? 3.5 : 2.5)
+      });
+    }
+  }
+
+  function updateParticles(dt){
+    gameState.particles = gameState.particles.filter(p => {
+      p.life -= dt;
+      if (p.life <= 0) return false;
+      p.x += p.vx; p.y += p.vy;
+      p.vy += 0.05; // slight drag toward gravity for a natural fade
+      return true;
+    });
+    gameState.floatingTexts = gameState.floatingTexts.filter(f => {
+      f.life -= dt;
+      if (f.life <= 0) return false;
+      f.y += f.vy;
+      return true;
+    });
+  }
+
+  function drawParticles(){
+    fxctx.clearRect(0, 0, WIDTH, HEIGHT);
+    gameState.particles.forEach(p => {
+      const alpha = Math.max(0, p.life / p.maxLife);
+      fxctx.globalAlpha = alpha;
+      fxctx.fillStyle = p.color;
+      fxctx.beginPath();
+      fxctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      fxctx.fill();
+    });
+    gameState.floatingTexts.forEach(f => {
+      const alpha = Math.max(0, f.life / f.maxLife);
+      fxctx.globalAlpha = alpha;
+      fxctx.fillStyle = f.color;
+      fxctx.font = '700 20px ui-sans-serif, system-ui, sans-serif';
+      fxctx.textAlign = 'center'; fxctx.textBaseline = 'middle';
+      fxctx.fillText(f.text, f.x, f.y);
+    });
+    fxctx.globalAlpha = 1;
+  }
+
+  // ---------- BREACH / GAME OVER ----------
+  // Accumulates settled-time above the danger line per body. A brief jostle
+  // from a new drop landing nearby PAUSES accumulation but doesn't wipe it,
+  // so rapid-fire clicking can't keep a stack alive above the line forever
+  // by continually resetting Matter's sleep state.
+  function checkBreach(dt){
+    gameState.animals.forEach(a => {
+      const b = a.body;
+      const aboveLine = (b.position.y - RADII[a.level]) < DANGER_Y;
+      if (!aboveLine){
+        gameState.sleepWatch.delete(b.id);
+        return;
+      }
+      playThrottled('warning', 900);
+      const speed = Math.hypot(b.velocity.x, b.velocity.y);
+      const settled = speed < 0.6;
+      const accumulated = (gameState.sleepWatch.get(b.id) || 0) + (settled ? dt : 0);
+      gameState.sleepWatch.set(b.id, accumulated);
+      if (accumulated > BREACH_MS){
+        triggerGameOver();
+      }
+    });
+  }
+
+  function triggerGameOver(){
+    if (gameState.gameOver) return;
+    gameState.gameOver = true;
+    audioManager.play('gameOver');
+    if (gameState.score > gameState.highScore){
+      gameState.highScore = gameState.score;
+      saveHighScore(gameState.highScore);
+    }
+    document.getElementById('finalScore').textContent = gameState.score;
+    document.getElementById('finalHigh').textContent = gameState.highScore;
+    document.getElementById('gameOverScreen').classList.add('show');
+  }
+
+  window.resetGame = function(){
+    Composite.clear(engine.world, false);
+    Composite.add(engine.world, [
+      Bodies.rectangle(WIDTH/2, HEIGHT + 10, WIDTH, 20, { isStatic: true }),
+      Bodies.rectangle(-5, HEIGHT/2, 10, HEIGHT, { isStatic: true }),
+      Bodies.rectangle(WIDTH + 5, HEIGHT/2, 10, HEIGHT, { isStatic: true })
+    ]);
+    gameState.animals = [];
+    gameState.particles = [];
+    gameState.floatingTexts = [];
+    gameState.mergeQueue = [];
+    gameState.squashMap.clear();
+    gameState.combo = { count: 0, lastTime: 0 };
+    gameState.score = 0;
+    gameState.spawnPoolSize = DEFAULT_SPAWN_POOL_SIZE;
+    gameState.nextLevel = Math.floor(Math.random() * gameState.spawnPoolSize);
+    gameState.gameOver = false;
+    gameState.paused = false;
+    setPauseIcon(false);
+    gameState.sleepWatch.clear();
+    updateDifficulty();
+    document.getElementById('gameOverScreen').classList.remove('show');
+  };
+
+  // ---------- PERSISTENCE (window.storage — localStorage is unsupported here) ----------
+  async function loadHighScore(){
+    try{
+      const res = await window.storage.get('animal-merge-highscore');
+      gameState.highScore = res ? Number(JSON.parse(res.value)) || 0 : 0;
+    } catch(e){
+      gameState.highScore = 0;
+    }
+  }
+  async function saveHighScore(val){
+    try{ await window.storage.set('animal-merge-highscore', JSON.stringify(val)); }
+    catch(e){ /* non-fatal */ }
+  }
+  async function loadMutePref(){
+    try{
+      const res = await window.storage.get('animal-merge-muted');
+      return res ? JSON.parse(res.value) === true : false;
+    } catch(e){
+      return false;
+    }
+  }
+  async function saveMutePref(val){
+    try{ await window.storage.set('animal-merge-muted', JSON.stringify(val)); }
+    catch(e){ /* non-fatal */ }
+  }
+
+  function setMuteIcon(muted){
+    document.getElementById('iconSoundOn').style.display = muted ? 'none' : 'block';
+    document.getElementById('iconSoundOff').style.display = muted ? 'block' : 'none';
+  }
+
+  document.getElementById('muteBtn').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const nowMuted = !audioManager.muted;
+    audioManager.setMuted(nowMuted);
+    setMuteIcon(nowMuted);
+    await saveMutePref(nowMuted);
+  });
+
+  function setPauseIcon(paused){
+    document.getElementById('iconPause').style.display = paused ? 'none' : 'block';
+    document.getElementById('iconPlay').style.display = paused ? 'block' : 'none';
+    document.getElementById('pausedOverlay').classList.toggle('show', paused);
+  }
+
+  function setPaused(paused){
+    gameState.paused = paused;
+    setPauseIcon(paused);
+  }
+
+  document.getElementById('pauseBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (gameState.gameOver) return;
+    setPaused(!gameState.paused);
+  });
+
+  // Performance/battery: auto-pause when the tab loses focus. Does not
+  // auto-resume on return — the player explicitly un-pauses via the button.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && !gameState.gameOver) setPaused(true);
+  });
+
+  document.getElementById('startBtn').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await audioManager.unlock();
+    document.getElementById('startOverlay').classList.add('hidden');
+    dropAnimal();
+  });
+
+  // ---------- RENDER ----------
+  function drawPhysicsLayer(){
+    pctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+    // Danger line
+    pctx.strokeStyle = 'var(--line-danger)'.startsWith('var') ? '#ef4444' : '#ef4444';
+    pctx.setLineDash([5, 5]);
+    pctx.beginPath(); pctx.moveTo(0, DANGER_Y); pctx.lineTo(WIDTH, DANGER_Y); pctx.stroke();
+    pctx.setLineDash([]);
+
+    // Next-item preview, locked to spawn path
+    pctx.font = '40px sans-serif'; pctx.textAlign = 'center';
+    pctx.globalAlpha = gameState.gameOver ? 0.3 : 1;
+    drawGlyph(pctx, gameState.nextLevel, gameState.mouseX, SPAWN_Y, RADII[gameState.nextLevel] * 1.9);
+    pctx.globalAlpha = 1;
+
+    // Bodies — position comes from physics, shape/outline never drawn
+    const now = performance.now();
+    gameState.animals.forEach(a => {
+      const b = a.body;
+      let scaleX = 1, scaleY = 1;
+      const squashStart = gameState.squashMap.get(a.id);
+      if (squashStart !== undefined){
+        const elapsed = now - squashStart;
+        if (elapsed < SQUASH_MS){
+          const p = 1 - elapsed / SQUASH_MS; // 1 -> 0
+          scaleX = 1 + 0.16 * p;
+          scaleY = 1 - 0.16 * p;
+        } else {
+          gameState.squashMap.delete(a.id);
+        }
+      }
+      drawGlyph(pctx, a.level, b.position.x, b.position.y, RADII[a.level] * 1.9, scaleX, scaleY);
+    });
+  }
+
+  function drawGlyph(ctx, level, x, y, size, scaleX = 1, scaleY = 1){
+    const img = imageCache[level];
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scaleX, scaleY);
+    ctx.translate(-x, -y);
+    if (img && img.complete && img.naturalWidth){
+      ctx.drawImage(img, x - size/2, y - size/2, size, size);
+    } else {
+      ctx.font = `${size}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(ANIMALS[level], x, y);
+    }
+    ctx.restore();
+  }
+
+  // ---------- MAIN LOOP ----------
+  let lastTime = performance.now();
+  function loop(now){
+    const dt = Math.min(now - lastTime, 50);
+    lastTime = now;
+
+    if (!gameState.gameOver && !gameState.paused){
+      Engine.update(engine, 1000 / 60);
+      applyMerges();     // atomic remove-old / add-new, once per frame
+      checkBreach(dt);
+      updateDifficulty();
+      updateParticles(dt);
+    }
+
+    document.getElementById('scoreVal').textContent = gameState.score;
+    document.getElementById('highScoreVal').textContent = gameState.highScore;
+
+    drawPhysicsLayer();
+    drawParticles();
+
+    requestAnimationFrame(loop);
+  }
+
+  preloadAssets(async () => {
+    await loadHighScore();
+    document.getElementById('highScoreVal').textContent = gameState.highScore;
+    const muted = await loadMutePref();
+    audioManager.setMuted(muted);
+    setMuteIcon(muted);
+    requestAnimationFrame(loop);
+  });
+})();
+</script>
+</body>
+</html>
